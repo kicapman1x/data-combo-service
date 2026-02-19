@@ -2,33 +2,28 @@ import json
 import ssl
 import pika
 import os
-import hmac
-import hashlib
-import base64
 import time
 import mysql.connector
 import uuid
 import logging
 import requests
-import gzip
 from datetime import datetime
-import sys
 from confluent_kafka import Consumer
+import sys
 
 def bootstrap():
     #Environment variables
-    global facial_dir, facial_api, rmq_url, rmq_port, rmq_username, rmq_password, ca_cert, secret_key, mysql_url, mysql_port, mysql_user, mysql_password, CONSUME_TOPIC_NAME, logdir, loglvl, mysql_db_s1, logger, kafka_url, cert_file, key_file, CONSUME_TOPIC_NAME_FLT, CONSUME_TOPIC_NAME_PSG, PRODUCE_QUEUE_NAME_FLT, PRODUCE_QUEUE_NAME_PSG
-    facial_dir = os.environ.get("FACIAL_DIR")
-    facial_api = os.environ.get("image_gen_api")
+    global rmq_url, rmq_port, rmq_username, rmq_password, ca_cert, mysql_url, mysql_port, mysql_user, mysql_password, CONSUME_TOPIC_NAME, logdir, loglvl, mysql_db_s1, logger, kafka_url, cert_file, key_file, CONSUME_TOPIC_NAME_FLT, CONSUME_TOPIC_NAME_PSG, PRODUCE_QUEUE_NAME_FLT, PRODUCE_QUEUE_NAME_PSG, rmq_poll_interval, kafka_consumer_group
     rmq_url = os.environ.get("RMQ_HOST")
     rmq_port = int(os.environ.get("RMQ_PORT"))
     rmq_username = os.environ.get("RMQ_USER")
     rmq_password = os.environ.get("RMQ_PW")
+    rmq_poll_interval = float(os.environ.get("RMQ_POLL_INT"))
+    kafka_consumer_group = os.environ.get("KAFKA_RTS_PF_CG_ID")
     kafka_url = os.environ.get("KAFKA_HOST")
     ca_cert = os.environ.get("CA_PATH")
     cert_file = os.environ.get("CERT_PATH")
     key_file = os.environ.get("KEY_PATH")
-    secret_key = os.environ.get("HMAC_KEY").encode("utf-8")
     CONSUME_TOPIC_NAME_FLT = os.environ.get("KAFKA_FLIGHT_TOPIC", "rts_flights_topic")
     CONSUME_TOPIC_NAME_PSG = os.environ.get("KAFKA_PASSENGER_TOPIC", "rts_passengers_topic")
     PRODUCE_QUEUE_NAME_FLT = os.environ.get("RMQ_FLIGHT_QUEUE", "rts_flights_queue")
@@ -62,7 +57,7 @@ def get_kafka_consumer():
         'ssl.ca.location': ca_cert,
         "ssl.certificate.location": cert_file,
         "ssl.key.location": key_file,
-        'group.id': 'rts-passenger-consumer-group',
+        'group.id': kafka_consumer_group,
         'auto.offset.reset': 'earliest',
         'enable.auto.commit': False,
         'max.poll.interval.ms': 300000
@@ -131,9 +126,25 @@ if __name__ == "__main__":
     connection = get_rmq_connection()
     channel = connection.channel()
     consumer = get_kafka_consumer()
-    consumer.subscribe([CONSUME_TOPIC_NAME_FLT, CONSUME_TOPIC_NAME_PSG])
-    for msg in consumer:
-        if msg.topic == CONSUME_TOPIC_NAME_FLT:
-            handle_flight_topic(channel, msg)
-        elif msg.topic == CONSUME_TOPIC_NAME_PSG:
-            handle_passenger_topic(channel, msg)
+    consumer.subscribe([CONSUME_TOPIC_NAME_PSG,CONSUME_TOPIC_NAME_FLT])
+    logger.info(f"subscribed to kafka topics: {CONSUME_TOPIC_NAME_FLT} and {CONSUME_TOPIC_NAME_PSG}")
+    while True:
+      msg = consumer.poll(rmq_poll_interval)      
+      if msg is None:
+          logger.warning("No messages detected")
+          continue
+      elif msg.error():
+          logger.error("Consumer error:", msg.error())
+          continue
+      elif msg.topic() == CONSUME_TOPIC_NAME_FLT:
+          handle_flight_topic(channel, msg.value().decode("utf-8"))
+          logger.info(f"Consuming from {CONSUME_TOPIC_NAME_FLT}")
+          consumer.commit(msg)
+      elif msg.topic() == CONSUME_TOPIC_NAME_PSG:
+          logger.info(f"Consuming from {CONSUME_TOPIC_NAME_PSG}")
+          handle_passenger_topic(channel, msg.value().decode("utf-8"))
+          consumer.commit(msg)
+      else:
+          logger.warning("Internal error")
+
+         

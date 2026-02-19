@@ -8,9 +8,11 @@ import logging
 import threading
 from flask import Flask, request, jsonify, abort
 
+app = Flask(__name__)
+
 def bootstrap():
     #Environment variables
-    global rmq_url, rmq_port, rmq_username, rmq_password, ca_cert, secret_key, mysql_url, mysql_port, mysql_user, mysql_password, mysql_db, CONSUME_QUEUE_NAME, PRODUCE_QUEUE_NAME, logdir, loglvl, logger, CONSUME_QUEUE_NAME_FLT, CONSUME_QUEUE_NAME_PSG, app, cert_file, key_file, PRODUCE_QUEUE_NAME_SCHED_PF, pf_be_host
+    global rmq_url, rmq_port, rmq_username, rmq_password, ca_cert, mysql_url, mysql_port, mysql_user, mysql_password, mysql_db, CONSUME_QUEUE_NAME, PRODUCE_QUEUE_NAME, logdir, loglvl, logger, CONSUME_QUEUE_NAME_FLT, CONSUME_QUEUE_NAME_PSG, cert_file, key_file, PRODUCE_QUEUE_NAME_SCHED_PF, pf_be_host
     cert_file = os.environ.get("CERT_PATH")
     key_file = os.environ.get("KEY_PATH")
     rmq_url = os.environ.get("RMQ_HOST")
@@ -18,7 +20,6 @@ def bootstrap():
     rmq_username = os.environ.get("RMQ_USER")
     rmq_password = os.environ.get("RMQ_PW")
     ca_cert = os.environ.get("CA_PATH")
-    secret_key = os.environ.get("HMAC_KEY").encode("utf-8")
     mysql_url = os.environ.get("MYSQL_HOST")
     mysql_port = int(os.environ.get("MYSQL_PORT"))
     mysql_user = os.environ.get("MYSQL_USER")
@@ -30,7 +31,6 @@ def bootstrap():
     logdir = os.environ.get("log_directory", ".")
     loglvl = os.environ.get("log_level", "INFO").upper()
     pf_be_host = os.environ.get("PF_BE_HOST", "pf-be.han.gg")
-    app = Flask(__name__)
 
     #logging
     log_level = getattr(logging, loglvl, logging.INFO)
@@ -148,7 +148,7 @@ def insert_flight(conn, flight_id, airline, flight_code, source_city, destinatio
             destination_city,
             departure_date
         )
-        VALUES (%s, %s, %s, %s, %s, FALSE)
+        VALUES (%s, %s, %s, %s, %s, %s)
         """,
         (
             flight_id,
@@ -176,12 +176,12 @@ def process_message_passenger(channel, method, properties, body):
 
 def process_passenger(message):
     logger.debug(f"Processing passenger: {message}")
-    p_id = message["passenger_id"]
-    sn = message["first_name"]
-    ln = message["last_name"]
+    p_id = message["Passenger ID"]
+    sn = message["First Name"]
+    ln = message["Last Name"]
     p_fn = f"{sn} {ln}"
-    p_nat = message["nationality"]
-    p_age = int(message["age"])
+    p_nat = message["Nationality"]
+    p_age = int(message["Age"])
     f_id = message["flight_id"]
 
     conn = get_mysql_connection()

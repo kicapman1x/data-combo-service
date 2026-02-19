@@ -11,9 +11,8 @@ logger = logging.getLogger(__name__)
 
 def bootstrap():
     #Environment variables
-    global payload_dir, tmp_dir, ca_cert, n_sampled, logdir, loglvl, kafka_url, cert_file, key_file, PRODUCE_TOPIC_NAME, count, kafka_producer_conn
+    global payload_dir, ca_cert, n_sampled, logdir, loglvl, kafka_url, cert_file, key_file, PRODUCE_TOPIC_NAME, kafka_producer_conn
     payload_dir = os.getenv("PAYLOAD_DIR")
-    tmp_dir = os.getenv("TMP_DIR")
     kafka_url = os.environ.get("KAFKA_HOST")
     ca_cert = os.environ.get("CA_PATH")
     cert_file = os.environ.get("CERT_PATH")
@@ -21,9 +20,8 @@ def bootstrap():
     PRODUCE_TOPIC_NAME = os.environ.get("KAFKA_FLIGHT_TOPIC", "rts_flights_topic")
     logdir = os.environ.get("log_directory", ".")
     loglvl = os.environ.get("log_level", "INFO").upper()
-    n_sampled= int(os.environ.get("sampled_flights_no", "10")),
+    n_sampled = int(os.environ.get("sampled_flights_no"))
     kafka_producer_conn = get_kafka_producer()
-    count = 0
 
     #Logging setup
     log_level = getattr(logging, loglvl, logging.INFO)
@@ -57,7 +55,7 @@ def stub_flights():
   
     logger.info(f"Selecting {n_sampled} random rows")
     sampled_flights = random.sample(rows, n_sampled)
-
+    count = 1
     for r in sampled_flights:
         dt = datetime.now()
         dt += timedelta(
