@@ -8,14 +8,14 @@ import os
 import logging
 import threading
 from confluent_kafka import Producer
-import pymqi
 import json
 import requests
 import time
+import ibmmq
 
 def bootstrap():
     #Environment variables
-    global ca_cert, logdir, loglvl, logger, cert_file, key_file, ibmmq_host, ibmmq_port, ibmmq_user, ibmmq_password, ibmmq_queue_manager, ibmmq_channel, ibmmq_key_repo, ibmmq_producer_conn, ibmmq_queue
+    global ca_cert, logdir, loglvl, logger, cert_file, key_file, ibmmq_host, ibmmq_port, ibmmq_user, ibmmq_password, ibmmq_queue_manager, ibmmq_channel, ibmmq_key_repo, ibmmq_producer_conn, ibmmq_queue_name, ibmmq_q
     cert_file = os.environ.get("CERT_PATH")
     key_file = os.environ.get("KEY_PATH")
     ibmmq_host = os.environ.get("IBM_MQ_HOST")
@@ -28,8 +28,11 @@ def bootstrap():
     ca_cert = os.environ.get("CA_PATH")
     logdir = os.environ.get("log_directory", ".")
     loglvl = os.environ.get("log_level", "INFO").upper()
-    ibmmq_producer_conn = connect_ibm_mq()
-    ibmmq_queue = pymqi.Queue(ibmmq_producer_conn, "PF.TOKEN.QUEUE")
+    ibmmq_queue_name = os.environ.get("IBM_MQ_QUEUE_NAME", "PF.TOKEN.QUEUE")
+    ibmmq_qm = get_ibmmq_queue_manager()
+    ibmmq_q = ibmmq.Queue(ibmmq_qm, ibmmq_queue_name)
+    pf_be_host = os.environ.get("PF_BE_HOST", "pf-be.han.gg")
+
 
 
     #logging
@@ -51,36 +54,31 @@ def bootstrap():
     logger.addHandler(stdout_handler)
     logger.addHandler(file_handler)
 
-def connect_ibm_mq():
-    queue_manager = ibmmq_queue_manager
-    channel = ibmmq_channel
-    conn_info = f"{ibmmq_host}({ibmmq_port})"
-
-    cd = pymqi.CD()
-    cd.ChannelName = channel
+def get_ibmmq_queue_manager():
+    conn_info = '%s(%s)' % (ibmmq_host, ibmmq_port)
+    ssl_cipher_spec = 'ANY_TLS12_OR_HIGHER'
+    key_repo_location = ibmmq_key_repo
+    cd = ibmmq.CD()
+    cd.ChannelName = ibmmq_channel
     cd.ConnectionName = conn_info
-    cd.ChannelType = pymqi.CMQC.MQCHT_CLNTCONN
-    cd.TransportType = pymqi.CMQC.MQXPT_TCP
-    sco = pymqi.SCO()
-    sco.KeyRepository = ibmmq_key_repo
-
-    qmgr = pymqi.QueueManager(None)
-
-    qmgr.connect_with_options(
-        queue_manager,
-        user=ibmmq_user,
-        password=ibmmq_password,
-        cd=cd,
-        sco=sco
-    )
+    cd.ChannelType = ibmmq.CMQXC.MQCHT_CLNTCONN
+    cd.TransportType = ibmmq.CMQXC.MQXPT_TCP
+    cd.SSLCipherSpec = ssl_cipher_spec
+    sco = ibmmq.SCO()
+    sco.KeyRepository = key_repo_location
+    cno = ibmmq.CNO()
+    cno.Options = ibmmq.CMQC.MQCNO_CLIENT_BINDING
+    qmgr = ibmmq.QueueManager(None)
+    qmgr.connect_with_options(ibmmq_queue_manager, cd, sco, cno=cno)
     return qmgr
+
 
 def listen():
     try:
-        print(f"Listening on queue 'PF.TOKEN.QUEUE'...")
+        print(f"Listening on queue {ibmmq_queue_name}...")
         while True:
             try:
-                message_bytes = ibmmq_queue.get()
+                message_bytes = ibmmq_q.get()
                 message_str = message_bytes.decode("utf-8")
 
                 print("Received message:")
@@ -89,9 +87,8 @@ def listen():
                     print("Parsed JSON:", data)
                 except:
                     pass
-
-            except pymqi.MQMIError as e:
-                if e.reason == pymqi.CMQC.MQRC_NO_MSG_AVAILABLE:
+            except Exception as e:
+                if hasattr(e, "reason") and e.reason == 2033:
                     continue
                 else:
                     raise

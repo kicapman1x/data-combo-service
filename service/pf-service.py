@@ -252,7 +252,7 @@ def produce_scheduled_data_to_rmq(data):
         channel.queue_declare(queue=PRODUCE_QUEUE_NAME_SCHED_PF, durable=True)
 
         for record in data:
-            message = json.dumps(record)
+            message = json.dumps(record, default=str)
             channel.basic_publish(
                 exchange="",
                 routing_key=PRODUCE_QUEUE_NAME_SCHED_PF,
@@ -279,8 +279,8 @@ def get_all_pf_data(conn):
             f.source_city,
             f.destination_city,
             f.departure_date
-        FROM passenger p
-        JOIN flight f
+        FROM passengers p
+        JOIN flights f
             ON p.flight_id = f.flight_id
     """
     cursor.execute(query)
@@ -345,6 +345,7 @@ def TriggerPfQuery():
 
     try:
         handlePfQuerySchedule()
+        return jsonify({"status": "ok"}), 200
     except Exception as e:
         print("Error processing request:", str(e))
         return jsonify({"error": "Internal server error"}), 500
@@ -353,4 +354,4 @@ if __name__ == "__main__":
     bootstrap()
     t1 = threading.Thread(target=rmq_listener, daemon=True)
     t1.start()
-    app.run(host="0.0.0.0", port=9443, ssl_context=(cert_file, key_file), use_reloader=False)
+    app.run(host="0.0.0.0", port=2443, ssl_context=(cert_file, key_file), use_reloader=False)

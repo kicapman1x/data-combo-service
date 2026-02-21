@@ -1,4 +1,5 @@
-import datetime
+from datetime import datetime, timezone
+import ssl
 import json
 import sys
 import ssl
@@ -9,17 +10,19 @@ import logging
 import threading
 from confluent_kafka import Producer
 import pymqi
+import ibmmq
 import json
 import requests
 import time
 
 def bootstrap():
     #Environment variables
-    global rmq_url, rmq_port, rmq_username, rmq_password, ca_cert, secret_key, logdir, loglvl, logger, cert_file, key_file, CONSUME_QUEUE_NAME_SCHED_PF, kafka_url, kafka_producer_conn, ibmmq_host, ibmmq_port, ibmmq_user, ibmmq_password, ibmmq_queue_manager, ibmmq_channel, ibmmq_key_repo, ibmmq_producer_conn, ibmmq_queue, pf_be_host,scheduler_interval
+    global rmq_url, rmq_port, rmq_username, rmq_password, ca_cert, logdir, loglvl, logger, cert_file, key_file, CONSUME_QUEUE_NAME_SCHED_PF, kafka_url, kafka_producer_conn, ibmmq_host, ibmmq_port, ibmmq_user, ibmmq_password, ibmmq_queue_manager, ibmmq_channel, ibmmq_key_repo, ibmmq_producer_conn, ibmmq_queue, pf_be_host,scheduler_interval, ibmmq_queue_name, headers, kafka_data_lake_topic, ibmmq_q
     cert_file = os.environ.get("CERT_PATH")
     key_file = os.environ.get("KEY_PATH")
     rmq_url = os.environ.get("RMQ_HOST")
     kafka_url = os.environ.get("KAFKA_HOST")
+    kafka_data_lake_topic = os.environ.get("KAFKA_DATA_LAKE_TOPIC", "pf_data_lake_topic")
     rmq_port = int(os.environ.get("RMQ_PORT"))
     rmq_username = os.environ.get("RMQ_USER")
     rmq_password = os.environ.get("RMQ_PW")
@@ -31,15 +34,16 @@ def bootstrap():
     ibmmq_channel = os.environ.get("IBM_MQ_CHANNEL")
     ibmmq_key_repo = os.environ.get("IBM_MQ_KEY_REPO")
     ca_cert = os.environ.get("CA_PATH")
-    secret_key = os.environ.get("HMAC_KEY").encode("utf-8")
     CONSUME_QUEUE_NAME_SCHED_PF = os.environ.get("RMQ_SCHED_PF_QUEUE", "sched_pf_queue")
     logdir = os.environ.get("log_directory", ".")
     loglvl = os.environ.get("log_level", "INFO").upper()
     kafka_producer_conn = get_kafka_producer()
-    ibmmq_producer_conn = connect_ibm_mq()
-    ibmmq_queue = pymqi.Queue(ibmmq_producer_conn, "PF.TOKEN.QUEUE")
+    ibmmq_queue_name = os.environ.get("IBM_MQ_QUEUE_NAME", "PF.TOKEN.QUEUE")
+    ibmmq_qm = get_ibmmq_queue_manager()
+    ibmmq_q = ibmmq.Queue(ibmmq_qm, ibmmq_queue_name)
     pf_be_host = os.environ.get("PF_BE_HOST", "pf-be.han.gg")
     scheduler_interval = int(os.environ.get("SCHEDULER_INTERVAL", "600"))
+    headers = {"X-Whosurdaddy": "Han"}  
 
     #logging
     log_level = getattr(logging, loglvl, logging.INFO)
@@ -60,28 +64,22 @@ def bootstrap():
     logger.addHandler(stdout_handler)
     logger.addHandler(file_handler)
 
-def connect_ibm_mq():
-    queue_manager = ibmmq_queue_manager
-    channel = ibmmq_channel
-    conn_info = f"{ibmmq_host}({ibmmq_port})"
-
-    cd = pymqi.CD()
-    cd.ChannelName = channel
+def get_ibmmq_queue_manager():
+    conn_info = '%s(%s)' % (ibmmq_host, ibmmq_port)
+    ssl_cipher_spec = 'ANY_TLS12_OR_HIGHER'
+    key_repo_location = ibmmq_key_repo
+    cd = ibmmq.CD()
+    cd.ChannelName = ibmmq_channel
     cd.ConnectionName = conn_info
-    cd.ChannelType = pymqi.CMQC.MQCHT_CLNTCONN
-    cd.TransportType = pymqi.CMQC.MQXPT_TCP
-    sco = pymqi.SCO()
-    sco.KeyRepository = ibmmq_key_repo
-
-    qmgr = pymqi.QueueManager(None)
-
-    qmgr.connect_with_options(
-        queue_manager,
-        user=ibmmq_user,
-        password=ibmmq_password,
-        cd=cd,
-        sco=sco
-    )
+    cd.ChannelType = ibmmq.CMQXC.MQCHT_CLNTCONN
+    cd.TransportType = ibmmq.CMQXC.MQXPT_TCP
+    cd.SSLCipherSpec = ssl_cipher_spec
+    sco = ibmmq.SCO()
+    sco.KeyRepository = key_repo_location
+    cno = ibmmq.CNO()
+    cno.Options = ibmmq.CMQC.MQCNO_CLIENT_BINDING
+    qmgr = ibmmq.QueueManager(None)
+    qmgr.connect_with_options(ibmmq_queue_manager, cd, sco, cno=cno)
     return qmgr
 
 def get_rmq_connection():
@@ -167,19 +165,19 @@ def publish_to_kafka(message):
     body = json.dumps(message).encode("utf-8")
     try:
         kafka_producer_conn.produce(
-            topic="pf_data_lake",
+            topic=kafka_data_lake_topic,
             value=body
         )
         kafka_producer_conn.flush()
-        logger.info(f"Published message to Kafka topic 'pf_data_lake': {message}")
+        logger.info(f"Published message to Kafka topic {kafka_data_lake_topic} : {message}")
     except Exception as e:
         logger.error(f"Failed to publish message to Kafka: {e}")
 
 def publish_to_ibm_mq(message):
     try:
         msg_str = json.dumps(message)
-        ibmmq_queue.put(msg_str.encode("utf-8"))
-        logger.info(f"Published message to IBM MQ queue 'PF.TOKEN.QUEUE': {message}")
+        ibmmq_q.put(msg_str.encode("utf-8"))
+        logger.info(f"Published message to IBM MQ queue {ibmmq_queue_name}: {message}")
     except Exception as e:
         logger.error(f"Failed to publish message to IBM MQ: {e}")
 
@@ -189,7 +187,7 @@ def generate_pf_token(message):
     token = {
         "token_id": str(uuid.uuid4()),
         "event_type": "pf_token_generated",
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "data": {
             "passenger_id": message.get("passenger_id"),
             "passenger_name": message.get("passenger_name"),
@@ -211,7 +209,7 @@ def generate_pf_token(message):
 def schedule_pf():
     while True:
         try:
-            response = requests.post(f"https://{pf_be_host}/schedule-pf-query", timeout=10, verify=ca_cert, cert=(cert_file, key_file))
+            response = requests.post(f"https://{pf_be_host}:2443/schedule-pf-query", timeout=10, verify=ca_cert, cert=(cert_file, key_file), headers=headers)
             print("Endpoint called:", response.status_code)
         except Exception as e:
             print("HTTP error:", e)
