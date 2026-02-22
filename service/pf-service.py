@@ -354,4 +354,4 @@ if __name__ == "__main__":
     bootstrap()
     t1 = threading.Thread(target=rmq_listener, daemon=True)
     t1.start()
-    app.run(host="0.0.0.0", port=2443, ssl_context=(cert_file, key_file), use_reloader=False)
+    app.run(host="0.0.0.0", port=2443)

@@ -9,7 +9,6 @@ import os
 import logging
 import threading
 from confluent_kafka import Producer
-import pymqi
 import ibmmq
 import json
 import requests
@@ -76,10 +75,13 @@ def get_ibmmq_queue_manager():
     cd.SSLCipherSpec = ssl_cipher_spec
     sco = ibmmq.SCO()
     sco.KeyRepository = key_repo_location
+    csp = ibmmq.CSP()
+    csp.CSPUserId = ibmmq_user
+    csp.CSPPassword = ibmmq_password
     cno = ibmmq.CNO()
     cno.Options = ibmmq.CMQC.MQCNO_CLIENT_BINDING
     qmgr = ibmmq.QueueManager(None)
-    qmgr.connect_with_options(ibmmq_queue_manager, cd, sco, cno=cno)
+    qmgr.connect_with_options(ibmmq_queue_manager, cd, sco, cno=cno, csp=csp)
     return qmgr
 
 def get_rmq_connection():
@@ -209,7 +211,7 @@ def generate_pf_token(message):
 def schedule_pf():
     while True:
         try:
-            response = requests.post(f"https://{pf_be_host}:2443/schedule-pf-query", timeout=10, verify=ca_cert, cert=(cert_file, key_file), headers=headers)
+            response = requests.post(f"http://{pf_be_host}:2443/schedule-pf-query", timeout=10, headers=headers)
             print("Endpoint called:", response.status_code)
         except Exception as e:
             print("HTTP error:", e)

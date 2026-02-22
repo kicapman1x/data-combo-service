@@ -66,10 +66,13 @@ def get_ibmmq_queue_manager():
     cd.SSLCipherSpec = ssl_cipher_spec
     sco = ibmmq.SCO()
     sco.KeyRepository = key_repo_location
+    csp = ibmmq.CSP()
+    csp.CSPUserId = ibmmq_user
+    csp.CSPPassword = ibmmq_password
     cno = ibmmq.CNO()
     cno.Options = ibmmq.CMQC.MQCNO_CLIENT_BINDING
     qmgr = ibmmq.QueueManager(None)
-    qmgr.connect_with_options(ibmmq_queue_manager, cd, sco, cno=cno)
+    qmgr.connect_with_options(ibmmq_queue_manager, cd, sco, cno=cno, csp=csp)
     return qmgr
 
 
